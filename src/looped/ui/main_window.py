@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSlider,
     QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -31,9 +32,14 @@ from looped.services.library_service import LibraryService
 from looped.services.playlist_service import PlaylistService
 from looped.services.waveform_service import WaveformService
 from looped.ui.clip_editor_dialog import ClipEditorDialog
+from looped.ui.edit_track_dialog import EditTrackDialog
 from looped.ui.formatting import format_ms
+from looped.ui.track_table_widget import TrackTableWidget
 
+LIBRARY_VIEW = "library"
+SOUNDBOARD_VIEW = "soundboard"
 ALL_TRACKS_LABEL = "All Tracks"
+ALL_CLIPS_LABEL = "All Clips"
 
 
 class MainWindow(QMainWindow):
@@ -52,15 +58,16 @@ class MainWindow(QMainWindow):
         self.waveform_service = waveform_service
         self.audio_backend = audio_backend
 
+        self._current_view = LIBRARY_VIEW
         self._all_tracks: list[Track] = []
         self._all_clips: list[Clip] = []
         self._tracks_by_row: dict[int, Track] = {}
-        self._clips_by_id: dict[int, Clip] = {}
+        self._clips_by_row: dict[int, Clip] = {}
         self._playlists_by_id: dict[int, Playlist] = {}
         self._slider_is_user_dragging = False
 
         self.setWindowTitle("Looped MVP")
-        self.resize(1340, 760)
+        self.resize(1440, 820)
         self._build_ui()
 
         self._playback_timer = QTimer(self)
@@ -71,19 +78,34 @@ class MainWindow(QMainWindow):
         self.refresh_playlists()
         self.refresh_tracks()
         self.refresh_clips()
+        self._switch_view(LIBRARY_VIEW)
 
     def _build_ui(self) -> None:
         root = QWidget()
         layout = QVBoxLayout(root)
 
+        layout.addLayout(self._build_view_switcher())
+
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self._build_playlist_panel())
-        splitter.addWidget(self._build_tracks_panel())
-        splitter.addWidget(self._build_clips_panel())
-        splitter.setSizes([220, 820, 300])
+        splitter.addWidget(self._build_main_stack())
+        splitter.setSizes([240, 1120])
         layout.addWidget(splitter)
 
         self.setCentralWidget(root)
+
+    def _build_view_switcher(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        self.library_view_button = QPushButton("Library")
+        self.library_view_button.setCheckable(True)
+        self.library_view_button.clicked.connect(lambda: self._switch_view(LIBRARY_VIEW))
+        self.soundboard_view_button = QPushButton("Soundboard")
+        self.soundboard_view_button.setCheckable(True)
+        self.soundboard_view_button.clicked.connect(lambda: self._switch_view(SOUNDBOARD_VIEW))
+        row.addWidget(self.library_view_button)
+        row.addWidget(self.soundboard_view_button)
+        row.addStretch()
+        return row
 
     def _build_playlist_panel(self) -> QWidget:
         panel = QWidget()
@@ -99,7 +121,13 @@ class MainWindow(QMainWindow):
         layout.addWidget(create_playlist_button)
         return panel
 
-    def _build_tracks_panel(self) -> QWidget:
+    def _build_main_stack(self) -> QWidget:
+        self.view_stack = QStackedWidget()
+        self.view_stack.addWidget(self._build_library_view())
+        self.view_stack.addWidget(self._build_soundboard_view())
+        return self.view_stack
+
+    def _build_library_view(self) -> QWidget:
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
@@ -109,6 +137,8 @@ class MainWindow(QMainWindow):
         toolbar = QHBoxLayout()
         import_button = QPushButton("Import Folder")
         import_button.clicked.connect(self.import_folder)
+        edit_track_button = QPushButton("Edit Track")
+        edit_track_button.clicked.connect(self.edit_selected_track)
         add_to_playlist_button = QPushButton("Add To Playlist")
         add_to_playlist_button.clicked.connect(self.add_selected_tracks_to_playlist)
         delete_track_button = QPushButton("Delete Track")
@@ -116,6 +146,7 @@ class MainWindow(QMainWindow):
         open_clip_editor_button = QPushButton("Open Clip Editor")
         open_clip_editor_button.clicked.connect(self.open_clip_editor_for_selected_track)
         toolbar.addWidget(import_button)
+        toolbar.addWidget(edit_track_button)
         toolbar.addWidget(add_to_playlist_button)
         toolbar.addWidget(delete_track_button)
         toolbar.addWidget(open_clip_editor_button)
@@ -143,15 +174,18 @@ class MainWindow(QMainWindow):
         self.track_filter_input.textChanged.connect(self.refresh_tracks)
         layout.addWidget(self.track_filter_input)
 
-        self.track_table = QTableWidget(0, 5)
+        self.track_table = TrackTableWidget(0, 5)
         self.track_table.setHorizontalHeaderLabels(["Title", "Artist", "Album", "Duration", "Path"])
         self.track_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.track_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.track_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.track_table.doubleClicked.connect(self.play_selected_track)
+        self.track_table.doubleClicked.connect(self.open_clip_editor_for_selected_track)
         self.track_table.itemSelectionChanged.connect(self._refresh_playback_position)
+        self.track_table.paths_dropped.connect(self.import_dropped_paths)
         self.track_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.track_table)
+
+        layout.addWidget(QLabel("Drag audio files or folders onto the track list to import"))
 
         seek_row = QHBoxLayout()
         self.position_label = QLabel("0:00")
@@ -167,30 +201,42 @@ class MainWindow(QMainWindow):
         layout.addLayout(seek_row)
         return panel
 
-    def _build_clips_panel(self) -> QWidget:
+    def _build_soundboard_view(self) -> QWidget:
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        layout.addWidget(QLabel("Saved Clips"))
 
-        self.clip_filter_input = QLineEdit()
-        self.clip_filter_input.setPlaceholderText("Filter clips by title or tags")
-        self.clip_filter_input.textChanged.connect(self.refresh_clips)
-        layout.addWidget(self.clip_filter_input)
+        self.clip_scope_label = QLabel(ALL_CLIPS_LABEL)
+        layout.addWidget(self.clip_scope_label)
 
-        self.clip_list = QListWidget()
-        self.clip_list.itemDoubleClicked.connect(self.play_selected_clip)
-        layout.addWidget(self.clip_list)
-
+        toolbar = QHBoxLayout()
+        add_to_playlist_button = QPushButton("Add To Playlist")
+        add_to_playlist_button.clicked.connect(self.add_selected_clip_to_playlist)
         play_button = QPushButton("Play Clip")
         play_button.clicked.connect(self.play_selected_clip)
         edit_button = QPushButton("Edit Clip")
         edit_button.clicked.connect(self.open_clip_editor_for_selected_clip)
         delete_button = QPushButton("Delete Clip")
         delete_button.clicked.connect(self.delete_selected_clip)
-        layout.addWidget(play_button)
-        layout.addWidget(edit_button)
-        layout.addWidget(delete_button)
-        layout.addStretch()
+        toolbar.addWidget(add_to_playlist_button)
+        toolbar.addWidget(play_button)
+        toolbar.addWidget(edit_button)
+        toolbar.addWidget(delete_button)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+
+        self.clip_filter_input = QLineEdit()
+        self.clip_filter_input.setPlaceholderText("Filter clips by title or tags")
+        self.clip_filter_input.textChanged.connect(self.refresh_clips)
+        layout.addWidget(self.clip_filter_input)
+
+        self.clip_table = QTableWidget(0, 4)
+        self.clip_table.setHorizontalHeaderLabels(["Clip", "Source Track", "Range", "Hotkey"])
+        self.clip_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.clip_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.clip_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.clip_table.doubleClicked.connect(self.play_selected_clip)
+        self.clip_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.clip_table)
         return panel
 
     def refresh_playlists(self) -> None:
@@ -201,9 +247,9 @@ class MainWindow(QMainWindow):
         self.playlist_list.blockSignals(True)
         self.playlist_list.clear()
 
-        all_tracks_item = QListWidgetItem(ALL_TRACKS_LABEL)
-        all_tracks_item.setData(Qt.UserRole, None)
-        self.playlist_list.addItem(all_tracks_item)
+        all_item = QListWidgetItem(self._all_items_label())
+        all_item.setData(Qt.UserRole, None)
+        self.playlist_list.addItem(all_item)
 
         selected_row = 0
         for playlist in playlists:
@@ -215,7 +261,7 @@ class MainWindow(QMainWindow):
 
         self.playlist_list.setCurrentRow(selected_row)
         self.playlist_list.blockSignals(False)
-        self._update_track_scope_label()
+        self._update_scope_labels()
 
     def refresh_tracks(self) -> None:
         playlist_id = self._selected_playlist_id()
@@ -246,14 +292,18 @@ class MainWindow(QMainWindow):
                 self.track_table.setItem(row, column, QTableWidgetItem(value))
 
         self.track_table.resizeColumnsToContents()
-        self._update_track_scope_label()
-
         if selected_track_id is not None:
             self._select_track_by_id(selected_track_id)
+        self._update_scope_labels()
         self._refresh_playback_position()
 
     def refresh_clips(self) -> None:
-        self._all_clips = self.clip_service.list_clips()
+        playlist_id = self._selected_playlist_id()
+        self._all_clips = (
+            self.clip_service.list_clips()
+            if playlist_id is None
+            else self.playlist_service.list_clips_for_playlist(playlist_id)
+        )
         filter_text = self.clip_filter_input.text().strip().lower()
         clips = [
             clip
@@ -262,29 +312,25 @@ class MainWindow(QMainWindow):
         ]
 
         selected_clip_id = self._selected_clip_id()
-        self._clips_by_id = {int(clip.id): clip for clip in clips if clip.id is not None}
-        self.clip_list.clear()
+        self._clips_by_row = {row: clip for row, clip in enumerate(clips)}
+        self.clip_table.setRowCount(len(clips))
 
-        for clip in clips:
+        for row, clip in enumerate(clips):
             source_track = self.library_service.get_track(clip.source_track_id)
             source_label = source_track.title if source_track else "Missing source"
-            item = QListWidgetItem(f"{clip.title} [{source_label}] ({format_ms(clip.start_ms)} - {format_ms(clip.end_ms)})")
-            item.setData(Qt.UserRole, int(clip.id))
-            self.clip_list.addItem(item)
+            values = [
+                clip.title,
+                source_label,
+                f"{format_ms(clip.start_ms)} - {format_ms(clip.end_ms)}",
+                clip.hotkey or "",
+            ]
+            for column, value in enumerate(values):
+                self.clip_table.setItem(row, column, QTableWidgetItem(value))
 
+        self.clip_table.resizeColumnsToContents()
         if selected_clip_id is not None:
             self._select_clip_by_id(selected_clip_id)
-
-    def import_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Choose music folder")
-        if not folder:
-            return
-
-        playlist_id = self._selected_playlist_id()
-        imported = self.library_service.import_folder(Path(folder), playlist_id=playlist_id)
-        self.refresh_tracks()
-        self.refresh_clips()
-        QMessageBox.information(self, "Import complete", f"Imported or updated {len(imported)} tracks.")
+        self._update_scope_labels()
 
     def create_playlist(self) -> None:
         name, accepted = QInputDialog.getText(self, "Create Playlist", "Playlist name")
@@ -300,6 +346,37 @@ class MainWindow(QMainWindow):
         self.refresh_playlists()
         self._select_playlist_by_id(int(playlist.id))
         self.refresh_tracks()
+        self.refresh_clips()
+
+    def import_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Choose music folder")
+        if not folder:
+            return
+        self._import_paths([Path(folder)])
+
+    def import_dropped_paths(self, path_strings: list[str]) -> None:
+        self._import_paths([Path(path) for path in path_strings])
+
+    def edit_selected_track(self) -> None:
+        track = self._selected_track()
+        if track is None or track.id is None:
+            self._show_error("Select a track first.")
+            return
+
+        dialog = EditTrackDialog(track, self)
+        if dialog.exec() == 0:
+            return
+
+        title, artist, album = dialog.values()
+        try:
+            self.library_service.update_track(int(track.id), title, artist, album)
+        except ValueError as exc:
+            self._show_error(str(exc))
+            return
+
+        self.refresh_tracks()
+        self.refresh_clips()
+        self._select_track_by_id(int(track.id))
 
     def add_selected_tracks_to_playlist(self) -> None:
         selected_tracks = self._selected_tracks()
@@ -307,19 +384,8 @@ class MainWindow(QMainWindow):
             self._show_error("Select one or more tracks first.")
             return
 
-        playlists = self.playlist_service.list_playlists()
-        if not playlists:
-            self._show_error("Create a playlist before adding tracks to one.")
-            return
-
-        names = [playlist.name for playlist in playlists]
-        selected_name, accepted = QInputDialog.getItem(self, "Add To Playlist", "Playlist", names, 0, False)
-        if not accepted or not selected_name:
-            return
-
-        playlist = next((entry for entry in playlists if entry.name == selected_name), None)
-        if playlist is None or playlist.id is None:
-            self._show_error("Unable to load the selected playlist.")
+        playlist = self._prompt_for_playlist("Add To Playlist", "Playlist")
+        if playlist is None:
             return
 
         added_count = self.playlist_service.add_tracks_to_playlist(
@@ -327,7 +393,27 @@ class MainWindow(QMainWindow):
             [int(track.id) for track in selected_tracks if track.id is not None],
         )
         self.refresh_tracks()
-        QMessageBox.information(self, "Tracks added", f"Added {added_count} track(s) to {playlist.name}.")
+        QMessageBox.information(self, "Playlist", f"Added {added_count} track(s) to {playlist.name}.")
+
+    def add_selected_clip_to_playlist(self) -> None:
+        clip = self._selected_clip()
+        if clip is None or clip.id is None:
+            self._show_error("Select a clip first.")
+            return
+
+        playlist = self._prompt_for_playlist("Add To Playlist", "Playlist")
+        if playlist is None:
+            return
+
+        try:
+            added = self.playlist_service.add_clip_to_playlist(int(playlist.id), int(clip.id))
+        except ValueError as exc:
+            self._show_error(str(exc))
+            return
+
+        self.refresh_clips()
+        message = f"Added clip to {playlist.name}." if added else f"Clip is already in {playlist.name}."
+        QMessageBox.information(self, "Playlist", message)
 
     def delete_selected_track(self) -> None:
         track = self._selected_track()
@@ -347,6 +433,17 @@ class MainWindow(QMainWindow):
         self.refresh_tracks()
         self.refresh_clips()
 
+    def delete_selected_clip(self) -> None:
+        clip = self._selected_clip()
+        if clip is None or clip.id is None:
+            self._show_error("Select a clip first.")
+            return
+        if QMessageBox.question(self, "Delete Clip", f"Delete clip '{clip.title}'?") != QMessageBox.Yes:
+            return
+
+        self.clip_service.delete_clip(int(clip.id))
+        self.refresh_clips()
+
     def play_selected_track(self) -> None:
         track = self._selected_track()
         if track is None:
@@ -356,10 +453,6 @@ class MainWindow(QMainWindow):
             return
         self.audio_backend.play_track(track)
         self._refresh_playback_position()
-
-    def stop_playback(self) -> None:
-        self.audio_backend.stop()
-        self._refresh_playback_position(preview_position_ms=0)
 
     def play_selected_clip(self) -> None:
         clip = self._selected_clip()
@@ -376,7 +469,10 @@ class MainWindow(QMainWindow):
 
         self.audio_backend.set_loop_region(clip.start_ms, clip.end_ms, enabled=False)
         self.audio_backend.play_clip(track, clip)
-        self._refresh_playback_position(preview_position_ms=clip.start_ms)
+
+    def stop_playback(self) -> None:
+        self.audio_backend.stop()
+        self._refresh_playback_position(preview_position_ms=0)
 
     def open_clip_editor_for_selected_track(self) -> None:
         track = self._selected_track()
@@ -396,16 +492,12 @@ class MainWindow(QMainWindow):
             return
         self._open_clip_editor(track, initial_clip_id=int(clip.id))
 
-    def delete_selected_clip(self) -> None:
-        clip = self._selected_clip()
-        if clip is None or clip.id is None:
-            self._show_error("Select a clip first.")
-            return
-        if QMessageBox.question(self, "Delete Clip", f"Delete clip '{clip.title}'?") != QMessageBox.Yes:
-            return
-
-        self.clip_service.delete_clip(int(clip.id))
+    def _import_paths(self, paths: list[Path]) -> None:
+        playlist_id = self._selected_playlist_id()
+        imported = self.library_service.import_paths(paths, playlist_id=playlist_id)
+        self.refresh_tracks()
         self.refresh_clips()
+        QMessageBox.information(self, "Import complete", f"Imported or updated {len(imported)} tracks.")
 
     def _open_clip_editor(self, track: Track, initial_clip_id: int | None) -> None:
         dialog = ClipEditorDialog(
@@ -417,11 +509,32 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         dialog.exec()
-        self.refresh_clips()
         self.refresh_tracks()
+        self.refresh_clips()
+
+    def _prompt_for_playlist(self, title: str, label: str) -> Playlist | None:
+        playlists = self.playlist_service.list_playlists()
+        if not playlists:
+            self._show_error("Create a playlist first.")
+            return None
+
+        names = [playlist.name for playlist in playlists]
+        selected_name, accepted = QInputDialog.getItem(self, title, label, names, 0, False)
+        if not accepted or not selected_name:
+            return None
+        return next((playlist for playlist in playlists if playlist.name == selected_name), None)
+
+    def _switch_view(self, view_name: str) -> None:
+        self._current_view = view_name
+        self.library_view_button.setChecked(view_name == LIBRARY_VIEW)
+        self.soundboard_view_button.setChecked(view_name == SOUNDBOARD_VIEW)
+        self.view_stack.setCurrentIndex(0 if view_name == LIBRARY_VIEW else 1)
+        self.refresh_playlists()
+        self._update_scope_labels()
 
     def _on_playlist_changed(self) -> None:
         self.refresh_tracks()
+        self.refresh_clips()
 
     def _refresh_playback_position(self, preview_position_ms: int | None = None) -> None:
         track = self._selected_track()
@@ -435,10 +548,11 @@ class MainWindow(QMainWindow):
 
         duration_ms = track.duration_ms
         position_ms = preview_position_ms if preview_position_ms is not None else 0
-
         if self.audio_backend.current_source_path() == track.filepath:
             duration_ms = self.audio_backend.current_duration_ms() or duration_ms
-            position_ms = preview_position_ms if preview_position_ms is not None else self.audio_backend.current_position_ms()
+            position_ms = (
+                preview_position_ms if preview_position_ms is not None else self.audio_backend.current_position_ms()
+            )
 
         position_ms = max(0, min(position_ms, duration_ms or position_ms))
         self.position_label.setText(format_ms(position_ms))
@@ -490,17 +604,14 @@ class MainWindow(QMainWindow):
         return int(track.id) if track and track.id is not None else None
 
     def _selected_clip(self) -> Clip | None:
-        clip_id = self._selected_clip_id()
-        if clip_id is None:
+        row = self.clip_table.currentRow()
+        if row < 0:
             return None
-        return self._clips_by_id.get(clip_id)
+        return self._clips_by_row.get(row)
 
     def _selected_clip_id(self) -> int | None:
-        item = self.clip_list.currentItem()
-        if item is None:
-            return None
-        value = item.data(Qt.UserRole)
-        return int(value) if value is not None else None
+        clip = self._selected_clip()
+        return int(clip.id) if clip and clip.id is not None else None
 
     def _select_playlist_by_id(self, playlist_id: int | None) -> None:
         for index in range(self.playlist_list.count()):
@@ -516,27 +627,37 @@ class MainWindow(QMainWindow):
         for row, track in self._tracks_by_row.items():
             if track.id == track_id:
                 self.track_table.selectRow(row)
-                self.track_table.scrollToItem(self.track_table.item(row, 0))
+                item = self.track_table.item(row, 0)
+                if item is not None:
+                    self.track_table.scrollToItem(item)
                 return True
         return False
 
     def _select_clip_by_id(self, clip_id: int | None) -> bool:
         if clip_id is None:
             return False
-        for index in range(self.clip_list.count()):
-            item = self.clip_list.item(index)
-            if item.data(Qt.UserRole) == clip_id:
-                self.clip_list.setCurrentRow(index)
+        for row, clip in self._clips_by_row.items():
+            if clip.id == clip_id:
+                self.clip_table.selectRow(row)
+                item = self.clip_table.item(row, 0)
+                if item is not None:
+                    self.clip_table.scrollToItem(item)
                 return True
         return False
 
-    def _update_track_scope_label(self) -> None:
+    def _all_items_label(self) -> str:
+        return ALL_TRACKS_LABEL if self._current_view == LIBRARY_VIEW else ALL_CLIPS_LABEL
+
+    def _update_scope_labels(self) -> None:
         playlist_id = self._selected_playlist_id()
         if playlist_id is None:
             self.track_scope_label.setText(ALL_TRACKS_LABEL)
+            self.clip_scope_label.setText(ALL_CLIPS_LABEL)
             return
         playlist = self._playlists_by_id.get(playlist_id)
-        self.track_scope_label.setText(playlist.name if playlist else ALL_TRACKS_LABEL)
+        label = playlist.name if playlist else self._all_items_label()
+        self.track_scope_label.setText(label)
+        self.clip_scope_label.setText(label)
 
     def _ensure_track_file_exists(self, track: Track) -> bool:
         if Path(track.filepath).exists():

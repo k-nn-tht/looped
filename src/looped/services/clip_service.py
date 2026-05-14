@@ -16,6 +16,7 @@ class ClipService(ABC):
         start_ms: int,
         end_ms: int,
         tags: str = "",
+        hotkey: str | None = None,
     ) -> Clip:
         raise NotImplementedError
 
@@ -43,6 +44,7 @@ class ClipService(ABC):
         start_ms: int,
         end_ms: int,
         tags: str = "",
+        hotkey: str | None = None,
     ) -> Clip:
         raise NotImplementedError
 
@@ -59,6 +61,7 @@ class SqliteClipService(ClipService):
         start_ms: int,
         end_ms: int,
         tags: str = "",
+        hotkey: str | None = None,
     ) -> Clip:
         clip = self._validated_clip(
             clip_id=None,
@@ -67,6 +70,7 @@ class SqliteClipService(ClipService):
             start_ms=start_ms,
             end_ms=end_ms,
             tags=tags,
+            hotkey=hotkey,
         )
         clip.id = self.clip_repository.create(clip)
         return clip
@@ -78,6 +82,7 @@ class SqliteClipService(ClipService):
         start_ms: int,
         end_ms: int,
         tags: str = "",
+        hotkey: str | None = None,
     ) -> Clip:
         existing_clip = self.clip_repository.get(clip_id)
         if existing_clip is None:
@@ -90,6 +95,7 @@ class SqliteClipService(ClipService):
             start_ms=start_ms,
             end_ms=end_ms,
             tags=tags,
+            hotkey=hotkey if hotkey is not None else existing_clip.hotkey,
             created_at=existing_clip.created_at,
         )
         self.clip_repository.update(clip)
@@ -115,6 +121,7 @@ class SqliteClipService(ClipService):
         start_ms: int,
         end_ms: int,
         tags: str,
+        hotkey: str | None,
         created_at: datetime | None = None,
     ) -> Clip:
         track = self.track_repository.get(source_track_id)
@@ -136,5 +143,6 @@ class SqliteClipService(ClipService):
             start_ms=start_ms,
             end_ms=end_ms,
             tags=tags.strip(),
+            hotkey=hotkey.strip() if hotkey else None,
             created_at=created_at or datetime.now(),
         )

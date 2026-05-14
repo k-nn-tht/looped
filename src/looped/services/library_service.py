@@ -7,6 +7,7 @@ from pathlib import Path
 from mutagen import File as MutagenFile
 
 from looped.domain.models import Track
+from looped.persistence.playlist_item_repository import PlaylistItemRepository
 from looped.persistence.repositories import PlaylistRepository, TrackRepository
 
 SUPPORTED_EXTENSIONS = {".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg"}
@@ -29,37 +30,34 @@ class LibraryService(ABC):
     def delete_track(self, track_id: int) -> None:
         raise NotImplementedError
 
+    @abstractmethod
+    def update_track(self, track_id: int, title: str, artist: str, album: str) -> Track:
+        raise NotImplementedError
+
+    @abstractmethod
+    def import_paths(self, paths: list[Path], playlist_id: int | None = None) -> list[Track]:
+        raise NotImplementedError
+
 
 class SqliteLibraryService(LibraryService):
     def __init__(
         self,
         track_repository: TrackRepository,
         playlist_repository: PlaylistRepository | None = None,
+        playlist_item_repository: PlaylistItemRepository | None = None,
     ) -> None:
         self.track_repository = track_repository
         self.playlist_repository = playlist_repository
+        self.playlist_item_repository = playlist_item_repository
 
     def import_folder(self, folder: Path, playlist_id: int | None = None) -> list[Track]:
-        imported_tracks: list[Track] = []
-        imported_track_ids: list[int] = []
-        for file_path in sorted(folder.rglob("*")):
-            if not file_path.is_file() or file_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-                continue
-            track = self._build_track(file_path)
-            track_id = self.track_repository.upsert(track)
-            track.id = track_id
-            imported_tracks.append(track)
-            imported_track_ids.append(track_id)
-
-        if playlist_id is not None:
-            if self.playlist_repository is None:
-                raise ValueError("Playlist support is not configured.")
-            self.playlist_repository.add_tracks(playlist_id, imported_track_ids)
-        return imported_tracks
+        return self.import_paths([folder], playlist_id=playlist_id)
 
     def list_tracks(self, playlist_id: int | None = None) -> list[Track]:
         if playlist_id is None:
             return self.track_repository.list_all()
+        if self.playlist_item_repository is not None:
+            return self.playlist_item_repository.get_tracks_for_playlist(playlist_id)
         return self.track_repository.list_for_playlist(playlist_id)
 
     def get_track(self, track_id: int) -> Track | None:
@@ -67,6 +65,47 @@ class SqliteLibraryService(LibraryService):
 
     def delete_track(self, track_id: int) -> None:
         self.track_repository.delete(track_id)
+
+    def update_track(self, track_id: int, title: str, artist: str, album: str) -> Track:
+        track = self.track_repository.get(track_id)
+        if track is None:
+            raise ValueError("Track does not exist.")
+
+        cleaned_title = title.strip()
+        if not cleaned_title:
+            raise ValueError("Track title is required.")
+
+        self.track_repository.update_metadata(
+            track_id=track_id,
+            title=cleaned_title,
+            artist=artist.strip(),
+            album=album.strip(),
+        )
+        updated_track = self.track_repository.get(track_id)
+        if updated_track is None:
+            raise ValueError("Unable to reload the updated track.")
+        return updated_track
+
+    def import_paths(self, paths: list[Path], playlist_id: int | None = None) -> list[Track]:
+        imported_tracks: list[Track] = []
+        imported_track_ids: list[int] = []
+
+        for file_path in self._iter_supported_files(paths):
+            track = self._build_track(file_path)
+            track_id = self.track_repository.upsert(track)
+            track.id = track_id
+            imported_tracks.append(track)
+            imported_track_ids.append(track_id)
+
+        if playlist_id is not None:
+            if self.playlist_item_repository is not None:
+                for track_id in imported_track_ids:
+                    self.playlist_item_repository.add_item(playlist_id, "track", track_id)
+            elif self.playlist_repository is None:
+                raise ValueError("Playlist support is not configured.")
+            else:
+                self.playlist_repository.add_tracks(playlist_id, imported_track_ids)
+        return imported_tracks
 
     def _build_track(self, file_path: Path) -> Track:
         audio_file = MutagenFile(file_path)
@@ -93,6 +132,22 @@ class SqliteLibraryService(LibraryService):
             duration_ms=duration_ms,
             imported_at=datetime.now(),
         )
+
+    @staticmethod
+    def _iter_supported_files(paths: list[Path]) -> list[Path]:
+        files: set[Path] = set()
+        for path in paths:
+            resolved_path = path.resolve()
+            if resolved_path.is_dir():
+                for file_path in resolved_path.rglob("*"):
+                    if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_EXTENSIONS:
+                        files.add(file_path.resolve())
+                continue
+
+            if resolved_path.is_file() and resolved_path.suffix.lower() in SUPPORTED_EXTENSIONS:
+                files.add(resolved_path)
+
+        return sorted(files)
 
     @staticmethod
     def _read_first_tag(tags, keys: list[str], fallback: str) -> str:

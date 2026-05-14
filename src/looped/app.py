@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication
 
 from looped.audio.backends.qt_backend import QtAudioBackend
 from looped.persistence.database import Database
+from looped.persistence.playlist_item_repository import PlaylistItemRepository
 from looped.persistence.repositories import ClipRepository, PlaylistRepository, TrackRepository
 from looped.services.clip_service import SqliteClipService
 from looped.services.library_service import SqliteLibraryService
@@ -22,12 +23,19 @@ def build_application() -> MainWindow:
 
     track_repository = TrackRepository(database)
     clip_repository = ClipRepository(database)
+    playlist_item_repository = PlaylistItemRepository(database)
     playlist_repository = PlaylistRepository(database)
-    library_service = SqliteLibraryService(track_repository, playlist_repository)
+    library_service = SqliteLibraryService(track_repository, playlist_repository, playlist_item_repository)
     clip_service = SqliteClipService(clip_repository, track_repository)
-    playlist_service = SqlitePlaylistService(playlist_repository, track_repository)
+    playlist_service = SqlitePlaylistService(
+        playlist_repository,
+        playlist_item_repository,
+        track_repository,
+        clip_repository,
+    )
     waveform_service = WaveformService()
     audio_backend = QtAudioBackend()
+    # TODO: Register the future global hotkey listener here once clip hotkey binding is implemented.
 
     return MainWindow(
         library_service=library_service,

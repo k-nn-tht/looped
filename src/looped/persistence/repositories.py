@@ -42,6 +42,17 @@ class TrackRepository:
             ).fetchone()
             return int(row["id"])
 
+    def update_metadata(self, track_id: int, title: str, artist: str, album: str) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE tracks
+                SET title = ?, artist = ?, album = ?
+                WHERE id = ?
+                """,
+                (title, artist, album, track_id),
+            )
+
     def list_all(self) -> list[Track]:
         with self.database.connect() as connection:
             rows = connection.execute(
@@ -59,9 +70,9 @@ class TrackRepository:
                 """
                 SELECT t.id, t.filepath, t.title, t.artist, t.album, t.duration_ms, t.imported_at
                 FROM tracks t
-                INNER JOIN playlist_tracks pt ON pt.track_id = t.id
-                WHERE pt.playlist_id = ?
-                ORDER BY pt.position ASC, t.title COLLATE NOCASE, t.artist COLLATE NOCASE
+                INNER JOIN playlist_items pi ON pi.item_id = t.id
+                WHERE pi.playlist_id = ? AND pi.item_type = 'track'
+                ORDER BY pi.position ASC, t.title COLLATE NOCASE, t.artist COLLATE NOCASE
                 """,
                 (playlist_id,),
             ).fetchall()
@@ -121,7 +132,7 @@ class ClipRepository:
             cursor = connection.execute(
                 """
                 INSERT INTO clips (source_track_id, title, start_ms, end_ms, tags, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     clip.source_track_id,
@@ -129,6 +140,7 @@ class ClipRepository:
                     clip.start_ms,
                     clip.end_ms,
                     clip.tags,
+                    clip.hotkey,
                     clip.created_at.isoformat(),
                 ),
             )
@@ -139,7 +151,7 @@ class ClipRepository:
             connection.execute(
                 """
                 UPDATE clips
-                SET title = ?, start_ms = ?, end_ms = ?, tags = ?
+                SET title = ?, start_ms = ?, end_ms = ?, tags = ?, hotkey = ?
                 WHERE id = ?
                 """,
                 (
@@ -147,6 +159,7 @@ class ClipRepository:
                     clip.start_ms,
                     clip.end_ms,
                     clip.tags,
+                    clip.hotkey,
                     clip.id,
                 ),
             )
@@ -155,7 +168,7 @@ class ClipRepository:
         with self.database.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, source_track_id, title, start_ms, end_ms, tags, created_at
+                SELECT id, source_track_id, title, start_ms, end_ms, tags, hotkey, created_at
                 FROM clips
                 ORDER BY created_at DESC
                 """
@@ -166,7 +179,7 @@ class ClipRepository:
         with self.database.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, source_track_id, title, start_ms, end_ms, tags, created_at
+                SELECT id, source_track_id, title, start_ms, end_ms, tags, hotkey, created_at
                 FROM clips
                 WHERE source_track_id = ?
                 ORDER BY created_at DESC
@@ -175,11 +188,25 @@ class ClipRepository:
             ).fetchall()
         return [self._row_to_clip(row) for row in rows]
 
+    def list_for_playlist(self, playlist_id: int) -> list[Clip]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT c.id, c.source_track_id, c.title, c.start_ms, c.end_ms, c.tags, c.hotkey, c.created_at
+                FROM clips c
+                INNER JOIN playlist_items pi ON pi.item_id = c.id
+                WHERE pi.playlist_id = ? AND pi.item_type = 'clip'
+                ORDER BY pi.position ASC, c.created_at DESC
+                """,
+                (playlist_id,),
+            ).fetchall()
+        return [self._row_to_clip(row) for row in rows]
+
     def get(self, clip_id: int) -> Clip | None:
         with self.database.connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, source_track_id, title, start_ms, end_ms, tags, created_at
+                SELECT id, source_track_id, title, start_ms, end_ms, tags, hotkey, created_at
                 FROM clips
                 WHERE id = ?
                 """,
@@ -200,6 +227,7 @@ class ClipRepository:
             start_ms=int(row["start_ms"]),
             end_ms=int(row["end_ms"]),
             tags=str(row["tags"]),
+            hotkey=str(row["hotkey"]) if row["hotkey"] is not None else None,
             created_at=_to_datetime(str(row["created_at"])),
         )
 
@@ -248,25 +276,26 @@ class PlaylistRepository:
             return 0
 
         with self.database.connect() as connection:
-            row = connection.execute(
-                "SELECT COALESCE(MAX(position), -1) AS max_position FROM playlist_tracks WHERE playlist_id = ?",
-                (playlist_id,),
-            ).fetchone()
-            next_position = int(row["max_position"]) + 1
             inserted = 0
-
             for track_id in ids:
+                row = connection.execute(
+                    """
+                    SELECT COALESCE(MAX(position), -1) AS max_position
+                    FROM playlist_items
+                    WHERE playlist_id = ? AND item_type = 'track'
+                    """,
+                    (playlist_id,),
+                ).fetchone()
+                next_position = int(row["max_position"]) + 1
                 cursor = connection.execute(
                     """
-                    INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position)
-                    VALUES (?, ?, ?)
+                    INSERT OR IGNORE INTO playlist_items (playlist_id, item_type, item_id, position)
+                    VALUES (?, 'track', ?, ?)
                     """,
                     (playlist_id, track_id, next_position),
                 )
                 if cursor.rowcount:
                     inserted += 1
-                    next_position += 1
-
             return inserted
 
     @staticmethod

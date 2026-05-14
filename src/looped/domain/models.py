@@ -23,6 +23,7 @@ class Clip:
     start_ms: int
     end_ms: int
     tags: str
+    hotkey: str | None
     created_at: datetime
 
 

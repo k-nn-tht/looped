@@ -87,20 +87,21 @@ The MVP schema includes working tables for:
 - `tracks`
 - `clips`
 - `playlists`
-- `playlist_tracks`
+- `playlist_items`
 - `settings`
-
-Playlist and settings support are present as placeholders for later phases.
 
 ## Phase 3: Runnable MVP Prototype
 
 Current MVP capabilities:
 
 - Scan/import a folder of `mp3`, `wav`, `flac`, `m4a`, `aac`, `ogg`
+- Drag audio files or folders onto the track list to import
 - Read track metadata and persist it in SQLite
 - List imported tracks
-- Create playlists and filter the track table by playlist or `All Tracks`
-- Add selected tracks to playlists
+- Create shared playlists that can contain both tracks and clips
+- Switch between `Library` and `Soundboard` views while keeping one shared playlists sidebar
+- Filter tracks by playlist in Library view and clips by playlist in Soundboard view
+- Add selected tracks or clips to playlists
 - Play/pause/stop selected tracks
 - Resume playback with `Play` when the current track is paused
 - Repeat the currently playing full track
@@ -114,6 +115,8 @@ Current MVP capabilities:
 - Replay saved clips
 - Edit saved clips in the clip editor
 - Delete saved clips
+- Show clip hotkeys as a read-only column in Soundboard view
+- Edit track title, artist, and album in SQLite without modifying source files
 - Filter tracks and clips with simple text search
 
 ## Phase 4: Future Backend Stubs
@@ -158,6 +161,7 @@ python -m looped.app
 - Deleting a track uses SQLite foreign-key cascades to also remove dependent clips and playlist mappings. The source audio file on disk is kept.
 - Importing into a selected playlist still imports into the master track library, then adds those imported tracks to the selected playlist.
 - Waveform preview uses `audioread` to decode a lightweight downsampled envelope for local files and is only computed when the clip editor opens for a track.
+- The `clips` table includes a nullable `hotkey` column for a future global-hotkey milestone, but hotkey binding is not implemented yet.
 
 ## MVP implementation plan
 

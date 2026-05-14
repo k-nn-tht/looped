@@ -260,6 +260,7 @@ class ClipEditorDialog(QDialog):
             start_ms=start_ms,
             end_ms=end_ms,
             tags=self.clip_tags_input.text().strip(),
+            hotkey=None,
             created_at=self.track.imported_at,
         )
         self._preview_active = True
