@@ -1,0 +1,2 @@
+[console_scripts]
+looped = looped.app:main
