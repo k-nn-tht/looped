@@ -1,5 +1,3 @@
-python3 -m looped.app
-
 # Looped MVP
 
 Looped is a local-first desktop audio app MVP for importing tracks, playing full songs, creating reusable clips, and replaying those clips from a soundboard-style list.
@@ -104,11 +102,15 @@ Current MVP capabilities:
 - Create playlists and filter the track table by playlist or `All Tracks`
 - Add selected tracks to playlists
 - Play/pause/stop selected tracks
-- Show a waveform preview for the selected track
-- Seek with a playback slider or by clicking the waveform
+- Resume playback with `Play` when the current track is paused
+- Repeat the currently playing full track
+- Seek selected tracks from the library playback slider
 - Delete track records without deleting the underlying file
+- Open a dedicated clip editor for a specific track
+- Load waveform data lazily only when the clip editor opens
 - Create clips from a selected track using start/end timestamps
-- Adjust clip start/end visually from waveform handles
+- Adjust clip start/end visually from waveform handles in the clip editor
+- Preview and loop the current clip region in the clip editor
 - Replay saved clips
 - Edit saved clips in the clip editor
 - Delete saved clips
@@ -155,7 +157,7 @@ python -m looped.app
 - If metadata tags are missing, the file stem is used as the track title.
 - Deleting a track uses SQLite foreign-key cascades to also remove dependent clips and playlist mappings. The source audio file on disk is kept.
 - Importing into a selected playlist still imports into the master track library, then adds those imported tracks to the selected playlist.
-- Waveform preview uses `audioread` to decode a lightweight downsampled envelope for local files.
+- Waveform preview uses `audioread` to decode a lightweight downsampled envelope for local files and is only computed when the clip editor opens for a track.
 
 ## MVP implementation plan
 

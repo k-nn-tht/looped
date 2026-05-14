@@ -28,6 +28,10 @@ class ClipService(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def list_clips_for_track(self, source_track_id: int) -> list[Clip]:
+        raise NotImplementedError
+
+    @abstractmethod
     def delete_clip(self, clip_id: int) -> None:
         raise NotImplementedError
 
@@ -96,6 +100,9 @@ class SqliteClipService(ClipService):
 
     def get_clip(self, clip_id: int) -> Clip | None:
         return self.clip_repository.get(clip_id)
+
+    def list_clips_for_track(self, source_track_id: int) -> list[Clip]:
+        return self.clip_repository.list_for_track(source_track_id)
 
     def delete_clip(self, clip_id: int) -> None:
         self.clip_repository.delete(clip_id)

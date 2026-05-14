@@ -162,6 +162,19 @@ class ClipRepository:
             ).fetchall()
         return [self._row_to_clip(row) for row in rows]
 
+    def list_for_track(self, source_track_id: int) -> list[Clip]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, source_track_id, title, start_ms, end_ms, tags, created_at
+                FROM clips
+                WHERE source_track_id = ?
+                ORDER BY created_at DESC
+                """,
+                (source_track_id,),
+            ).fetchall()
+        return [self._row_to_clip(row) for row in rows]
+
     def get(self, clip_id: int) -> Clip | None:
         with self.database.connect() as connection:
             row = connection.execute(
