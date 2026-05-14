@@ -4,8 +4,11 @@ Version: 0.1.0
 Summary: Local desktop audio player and clip replay MVP.
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
+Requires-Dist: audioread>=3.0
 Requires-Dist: PySide6>=6.7
 Requires-Dist: mutagen>=1.47
+
+python3 -m looped.app
 
 # Looped MVP
 
@@ -108,9 +111,18 @@ Current MVP capabilities:
 - Scan/import a folder of `mp3`, `wav`, `flac`, `m4a`, `aac`, `ogg`
 - Read track metadata and persist it in SQLite
 - List imported tracks
+- Create playlists and filter the track table by playlist or `All Tracks`
+- Add selected tracks to playlists
 - Play/pause/stop selected tracks
+- Show a waveform preview for the selected track
+- Seek with a playback slider or by clicking the waveform
+- Delete track records without deleting the underlying file
 - Create clips from a selected track using start/end timestamps
+- Adjust clip start/end visually from waveform handles
 - Replay saved clips
+- Edit saved clips in the clip editor
+- Delete saved clips
+- Filter tracks and clips with simple text search
 
 ## Phase 4: Future Backend Stubs
 
@@ -151,6 +163,9 @@ python -m looped.app
 - Playback uses Qt Multimedia in the MVP.
 - Clip replay seeks into the source file and stops automatically at the clip end.
 - If metadata tags are missing, the file stem is used as the track title.
+- Deleting a track uses SQLite foreign-key cascades to also remove dependent clips and playlist mappings. The source audio file on disk is kept.
+- Importing into a selected playlist still imports into the master track library, then adds those imported tracks to the selected playlist.
+- Waveform preview uses `audioread` to decode a lightweight downsampled envelope for local files.
 
 ## MVP implementation plan
 

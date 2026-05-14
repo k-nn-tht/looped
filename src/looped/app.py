@@ -11,6 +11,7 @@ from looped.persistence.repositories import ClipRepository, PlaylistRepository, 
 from looped.services.clip_service import SqliteClipService
 from looped.services.library_service import SqliteLibraryService
 from looped.services.playlist_service import SqlitePlaylistService
+from looped.services.waveform_service import WaveformService
 from looped.ui.main_window import MainWindow
 
 
@@ -25,12 +26,14 @@ def build_application() -> MainWindow:
     library_service = SqliteLibraryService(track_repository, playlist_repository)
     clip_service = SqliteClipService(clip_repository, track_repository)
     playlist_service = SqlitePlaylistService(playlist_repository, track_repository)
+    waveform_service = WaveformService()
     audio_backend = QtAudioBackend()
 
     return MainWindow(
         library_service=library_service,
         clip_service=clip_service,
         playlist_service=playlist_service,
+        waveform_service=waveform_service,
         audio_backend=audio_backend,
     )
 

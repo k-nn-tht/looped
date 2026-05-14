@@ -30,6 +30,10 @@ class AudioBackend(ABC):
     def current_position_ms(self) -> int:
         raise NotImplementedError
 
+    @abstractmethod
+    def current_duration_ms(self) -> int:
+        raise NotImplementedError
+
 
 class CaptureBackend(ABC):
     @abstractmethod

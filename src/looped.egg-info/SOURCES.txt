@@ -23,5 +23,8 @@ src/looped/persistence/repositories.py
 src/looped/services/__init__.py
 src/looped/services/clip_service.py
 src/looped/services/library_service.py
+src/looped/services/playlist_service.py
+src/looped/services/waveform_service.py
 src/looped/ui/__init__.py
 src/looped/ui/main_window.py
+src/looped/ui/waveform_widget.py

@@ -104,10 +104,15 @@ Current MVP capabilities:
 - Create playlists and filter the track table by playlist or `All Tracks`
 - Add selected tracks to playlists
 - Play/pause/stop selected tracks
+- Show a waveform preview for the selected track
+- Seek with a playback slider or by clicking the waveform
 - Delete track records without deleting the underlying file
 - Create clips from a selected track using start/end timestamps
+- Adjust clip start/end visually from waveform handles
 - Replay saved clips
+- Edit saved clips in the clip editor
 - Delete saved clips
+- Filter tracks and clips with simple text search
 
 ## Phase 4: Future Backend Stubs
 
@@ -150,6 +155,7 @@ python -m looped.app
 - If metadata tags are missing, the file stem is used as the track title.
 - Deleting a track uses SQLite foreign-key cascades to also remove dependent clips and playlist mappings. The source audio file on disk is kept.
 - Importing into a selected playlist still imports into the master track library, then adds those imported tracks to the selected playlist.
+- Waveform preview uses `audioread` to decode a lightweight downsampled envelope for local files.
 
 ## MVP implementation plan
 

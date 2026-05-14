@@ -134,6 +134,23 @@ class ClipRepository:
             )
             return int(cursor.lastrowid)
 
+    def update(self, clip: Clip) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE clips
+                SET title = ?, start_ms = ?, end_ms = ?, tags = ?
+                WHERE id = ?
+                """,
+                (
+                    clip.title,
+                    clip.start_ms,
+                    clip.end_ms,
+                    clip.tags,
+                    clip.id,
+                ),
+            )
+
     def list_all(self) -> list[Clip]:
         with self.database.connect() as connection:
             rows = connection.execute(
